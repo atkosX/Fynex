@@ -1,7 +1,8 @@
 "use client";
 
 import { Thread } from "@/components/assistant-ui/thread";
-import { useLocalRuntime, AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { useDataStreamRuntime } from "@assistant-ui/react-data-stream";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { TrendingUpIcon, CheckCircle2Icon, UserIcon } from "lucide-react";
@@ -11,6 +12,20 @@ export default function Home() {
   const [kiteAccessToken, setKiteAccessToken] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Setup assistant-ui runtime with data stream protocol
+  const runtime = useDataStreamRuntime({
+    api: "/api/chat",
+    onResponse: (response) => {
+      console.log('Data stream response received:', response.status);
+    },
+    onFinish: (message) => {
+      console.log('Message completed:', message);
+    },
+    onError: (error) => {
+      console.error('Data stream error:', error);
+    },
+  });
 
   // Check for access token in URL params (from OAuth callback)
   useEffect(() => {
@@ -70,42 +85,6 @@ export default function Home() {
       setIsLoading(false);
     }
   };
-
-  // Simple echo bot adapter for demonstration
-  const adapter = async ({ messages }: { messages: any[] }) => {
-    const lastMessage = messages[messages.length - 1];
-    const userMessage = lastMessage?.content
-      ?.filter((c: any) => c.type === "text")
-      .map((c: any) => c.text)
-      .join(" ") || "";
-
-    // Simulate a delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    let responseText = `You said: "${userMessage}"\n\n`;
-
-    if (isKiteConnected && kiteAccessToken) {
-      responseText += `Great! You're connected to Kite. I can help you with:\n\n`;
-      responseText += `- Check your holdings and positions\n`;
-      responseText += `- Get live market quotes\n`;
-      responseText += `- Analyze your portfolio\n`;
-      responseText += `- Place orders (coming soon)\n\n`;
-      responseText += `Try asking me: "Show my holdings" or "Get quote for RELIANCE"`;
-    } else {
-      responseText += `This is a demo chat interface. Please connect your Kite account to access trading features.`;
-    }
-
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: responseText,
-        },
-      ],
-    };
-  };
-
-  const runtime = useLocalRuntime(adapter);
 
   const handleKiteConnect = () => {
     const apiKey = process.env.NEXT_PUBLIC_KITE_API_KEY;
