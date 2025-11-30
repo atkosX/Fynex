@@ -113,7 +113,7 @@ export default function Home() {
         {/* Header with Kite Connect Button */}
         <div className="mb-4 flex w-full max-w-4xl items-center justify-between rounded-t-lg border-x border-t bg-card p-4">
           <div className="flex items-center gap-2">
-            <h1 className="font-semibold text-lg">FinAgent</h1>
+            <h1 className="font-semibold text-lg">Fynex</h1>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary text-xs">
               AI Trading Assistant
             </span>

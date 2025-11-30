@@ -120,24 +120,24 @@ const ThreadSuggestions: FC = () => {
     <div className="aui-thread-welcome-suggestions grid w-full @md:grid-cols-2 gap-2 pb-4">
       {[
         {
-          title: "What's the weather",
-          label: "in San Francisco?",
-          action: "What's the weather in San Francisco?",
+          title: "Deep Research",
+          label: "EV market in India",
+          action: "Analyze the competitive landscape of the EV market in India.",
         },
         {
-          title: "Explain React hooks",
-          label: "like useState and useEffect",
-          action: "Explain React hooks like useState and useEffect",
+          title: "Top Funds",
+          label: "Small Cap by 3Y Returns",
+          action: "What are the top 5 small cap mutual funds by 3-year returns?",
         },
         {
-          title: "Write a SQL query",
-          label: "to find top customers",
-          action: "Write a SQL query to find top customers",
+          title: "Compare Banks",
+          label: "HDFC vs ICICI",
+          action: "Compare HDFC Bank and ICICI Bank based on recent quarterly results.",
         },
         {
-          title: "Create a meal plan",
-          label: "for healthy weight loss",
-          action: "Create a meal plan for healthy weight loss",
+          title: "Market Outlook",
+          label: "IT Sector Analysis",
+          action: "What is the short-term outlook for the Indian IT sector?",
         },
       ].map((suggestedAction, index) => (
         <m.div
