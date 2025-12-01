@@ -16,6 +16,9 @@ export default function Home() {
   // Setup assistant-ui runtime with data stream protocol
   const runtime = useDataStreamRuntime({
     api: "/api/chat",
+    body: {
+      kiteAccessToken: kiteAccessToken,
+    },
     onResponse: (response) => {
       console.log('Data stream response received:', response.status);
     },

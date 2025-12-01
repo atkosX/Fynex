@@ -10,8 +10,9 @@ import { qdrantClient } from '@/lib/db/qdrant';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from "zod";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { getKitePortfolioDetails, formatPortfolioForLLM } from '@/lib/kite-tools';
 
-export const maxDuration = 60; // Increase timeout for RAG
+export const maxDuration = 300; // Increase timeout for RAG
 
 const embeddings = new GoogleGenerativeAIEmbeddings({
   modelName: "embedding-001",
@@ -21,7 +22,7 @@ const embeddings = new GoogleGenerativeAIEmbeddings({
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { messages } = body;
+    const { messages, kiteAccessToken } = body;
 
     console.log('Chat request body:', JSON.stringify(body, null, 2));
 
@@ -60,6 +61,11 @@ export async function POST(req: Request) {
         schema: z.object({
           query: z.string().describe("The search query to find relevant documents."),
         }),
+      },
+      {
+        name: "get_portfolio",
+        description: "Get the user's current portfolio details including holdings and positions from Zerodha Kite. Use this when the user asks about their portfolio, stocks, positions, or P&L.",
+        schema: z.object({}),
       }
     ];
 
@@ -97,6 +103,54 @@ export async function POST(req: Request) {
 
         if (toolCall) {
           console.log('Tool call detected:', toolCall);
+          
+          // Handle get_portfolio tool
+          if (toolCall.name === 'get_portfolio') {
+            if (!kiteAccessToken) {
+              controller.appendText('Please connect your Zerodha Kite account first to view your portfolio.');
+              controller.close();
+              return;
+            }
+            
+            try {
+              console.log('Fetching portfolio details...');
+              const portfolio = await getKitePortfolioDetails(kiteAccessToken);
+              const portfolioText = formatPortfolioForLLM(portfolio);
+              
+              // Generate response with portfolio context
+              const portfolioPrompt = ChatPromptTemplate.fromMessages([
+                ["system", SYSTEM_PROMPT],
+                new MessagesPlaceholder("messages"),
+                new ToolMessage({
+                  tool_call_id: toolCall.id || 'portfolio_tool',
+                  content: portfolioText
+                })
+              ]);
+              
+              const portfolioChain = portfolioPrompt.pipe(chat);
+              const portfolioStream = await portfolioChain.stream({
+                messages: [...langchainMessages, new AIMessage({ content: "", tool_calls: [toolCall] })]
+              });
+
+              for await (const chunk of portfolioStream) {
+                if (chunk.content) {
+                  const text = typeof chunk.content === 'string' ? chunk.content : JSON.stringify(chunk.content);
+                  controller.appendText(text);
+                }
+              }
+              
+              controller.close();
+              return;
+            } catch (error: any) {
+              console.error('Error fetching portfolio:', error);
+              controller.appendText(`Sorry, I couldn't fetch your portfolio details: ${error.message}`);
+              controller.close();
+              return;
+            }
+          }
+          
+          // Handle research_topic tool
+          if (toolCall.name === 'research_topic') {
           const requestId = uuidv4();
           const rawQuery = toolCall.args.query;
           const normalizedQuery = normalizeQuery(rawQuery);
@@ -126,26 +180,34 @@ export async function POST(req: Request) {
           await enqueueScrapingTask({ requestId, urls: uniqueUrls });
           
           // 3. Wait for processing (Poll Qdrant)
-          console.log(`Processing documents...`);
+          console.log(`Processing documents... (requestId: ${requestId})`);
           
           let attempts = 0;
           let foundDocs = false;
-          while (attempts < 30) { // Wait up to 30s
+          while (attempts < 180) { // Wait up to 3 mins
             await new Promise(r => setTimeout(r, 1000));
+            attempts++;
             try {
-              const count = await qdrantClient.count('financial_docs', {
-                filter: {
-                  must: [{ key: 'requestId', match: { value: requestId } }]
-                }
+              // Use scroll instead of count with filter (filter syntax issues)
+              const scrollResult = await qdrantClient.scroll('financial_docs', {
+                limit: 100,
+                with_payload: true,
               });
-              if (count.count > 0) {
+              
+              // Filter in JavaScript
+              const matchingDocs = scrollResult.points.filter(
+                (p: any) => p.payload?.requestId === requestId
+              );
+              
+              console.log(`[Attempt ${attempts}/180] Checking for docs with requestId=${requestId}: found ${matchingDocs.length} documents`);
+              if (matchingDocs.length > 0) {
                 foundDocs = true;
+                console.log(`✓ Found ${matchingDocs.length} documents after ${attempts} seconds`);
                 break;
               }
-            } catch (e) {
-              // Collection might not exist yet
+            } catch (e: any) {
+              console.error(`[Attempt ${attempts}] Error checking Qdrant:`, e.message);
             }
-            attempts++;
           }
 
           if (foundDocs) {
@@ -155,14 +217,14 @@ export async function POST(req: Request) {
             let allPoints: any[] = [];
             for (const q of expandedQueries) {
                 const vector = await embeddings.embedQuery(q);
+                // Search without filter, then filter in JS
                 const results = await qdrantClient.search('financial_docs', {
                   vector,
-                  filter: {
-                    must: [{ key: 'requestId', match: { value: requestId } }]
-                  },
-                  limit: 3
+                  limit: 20, // Get more results since we'll filter
                 });
-                allPoints.push(...results);
+                // Filter to only this requestId
+                const filtered = results.filter((r: any) => r.payload?.requestId === requestId);
+                allPoints.push(...filtered.slice(0, 3)); // Take top 3 per query
             }
 
             // Deduplicate by ID
@@ -175,7 +237,7 @@ export async function POST(req: Request) {
               ["system", SYSTEM_PROMPT],
               new MessagesPlaceholder("messages"),
               new ToolMessage({
-                tool_call_id: toolCall.id,
+                tool_call_id: toolCall.id || 'research_tool',
                 content: `Context from analysis (Multi-Query RAG):\n${context}\n\nSearch Snippets:\n${JSON.stringify(allSearchResults.slice(0, 5))}`
               })
             ]);
@@ -199,7 +261,7 @@ export async function POST(req: Request) {
               ["system", SYSTEM_PROMPT],
               new MessagesPlaceholder("messages"),
               new ToolMessage({
-                tool_call_id: toolCall.id,
+                tool_call_id: toolCall.id || 'research_tool',
                 content: `Search Snippets:\n${JSON.stringify(allSearchResults.slice(0, 5))}`
               })
             ]);
@@ -214,6 +276,7 @@ export async function POST(req: Request) {
                 const text = typeof chunk.content === 'string' ? chunk.content : JSON.stringify(chunk.content);
                 controller.appendText(text);
               }
+            }
             }
           }
         }
